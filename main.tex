@@ -1,0 +1,748 @@
+\documentclass[a4paper,12pt]{report}
+
+% Pacchetti necessari
+\usepackage[italian]{babel}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{geometry}
+\usepackage{fancyhdr}
+\usepackage{booktabs}
+
+% Configurazione del layout della pagina
+\geometry{a4paper, margin=2.5cm}
+
+% Configurazione degli stili di listings per il codice
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{backcolour},   
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{blue},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\small,
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=b,                    
+    keepspaces=true,                 
+    numbers=left,                    
+    numbersep=5pt,                  
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,                  
+    tabsize=2
+}
+
+\lstset{style=mystyle}
+
+% Configurazione dell'intestazione e piè di pagina
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{Progetto 2: Livelli di Isolamento in PostgreSQL}
+\fancyhead[R]{\thepage}
+\renewcommand{\footrulewidth}{0.4pt}
+\fancyfoot[C]{\textit{Tecnologie e architetture per la gestione dei dati}}
+
+\begin{document}
+
+% Frontespizio
+\begin{titlepage}
+    \centering
+    \includegraphics[width=0.3\textwidth]{example-image}\\[1cm] % Sostituire con il logo della tua università
+    {\scshape\LARGE Università degli Studi di XYZ \par}
+    \vspace{1cm}
+    {\scshape\Large Corso di Laurea Magistrale in Informatica \par}
+    \vspace{1.5cm}
+    {\huge\bfseries Livelli di Isolamento in PostgreSQL: \\ Studio e Sperimentazione \par}
+    \vspace{2cm}
+    {\Large\itshape Progetto per il corso di: \par}
+    {\LARGE Tecnologie e architetture per la gestione dei dati \par}
+    \vspace{1.5cm}
+    \begin{tabular}[t]{c c}
+    {\large\textbf{Docente:}} & {\large\textbf{Studente:}} \\
+    Prof. XYZ & Nome Cognome \\
+    & Matricola: 123456 \\
+    \end{tabular}
+    \vfill
+    {\large Anno Accademico 20XX/20XX \par}
+\end{titlepage}
+
+% Indice
+\tableofcontents
+\newpage
+
+\chapter{Introduzione}
+\section{Obiettivi del progetto}
+Il progetto si propone di studiare e sperimentare il comportamento di PostgreSQL nella gestione dei livelli di isolamento, con particolare riferimento alle principali anomalie che possono verificarsi durante l'esecuzione concorrente di transazioni.
+
+L'obiettivo principale è quello di analizzare come i diversi livelli di isolamento influenzino il comportamento del database in presenza di operazioni concorrenti, evidenziando le garanzie offerte da ciascun livello e le potenziali anomalie che possono manifestarsi.
+
+\section{Descrizione generale}
+I test effettuati si basano principalmente sui tre livelli di isolamento implementati da PostgreSQL. Ciascun livello garantisce garanzie diverse rispetto alla visibilità delle modifiche effettuate dalle transazioni concorrenti:
+
+\begin{enumerate}
+\item \textbf{READ COMMITTED}: il livello predefinito in PostgreSQL. Una query vede solo i dati che sono stati effettivamente confermati (committati) al momento in cui viene eseguita. Ciò significa che una SELECT può restituire risultati diversi se eseguita più volte all'interno della stessa transazione.
+
+\item \textbf{REPEATABLE READ}: fornisce una maggiore consistenza, garantendo che ogni lettura dello stesso dato all'interno di una transazione restituisca sempre lo stesso valore. Questo è reso possibile grazie al sistema di versioni multiple dei dati (MVCC).
+
+\item \textbf{SERIALIZABLE}: il livello più restrittivo, garantisce il massimo grado di consistenza simulando un'esecuzione seriale delle transazioni, anche se in realtà vengono eseguite in parallelo. Utilizza sia il sistema MVCC che il protocollo Two-Phase Locking (2PL) in modalità stretta.
+\end{enumerate}
+
+\chapter{Ambiente di lavoro e struttura dei dati}
+\section{Ambiente di sviluppo}
+Per la realizzazione di questo progetto è stato utilizzato:
+\begin{itemize}
+    \item PostgreSQL 15.x come sistema di gestione del database
+    \item Python 3.x come linguaggio di programmazione per i test
+    \item Libreria psycopg2 per la connessione a PostgreSQL da Python
+    \item Libreria Faker per la generazione di dati casuali
+    \item Jupyter Notebook come ambiente di sviluppo interattivo
+\end{itemize}
+
+\section{Struttura della tabella}
+Per la sperimentazione è stata utilizzata una tabella \textit{Studente} con la seguente struttura:
+
+\begin{lstlisting}[language=SQL]
+CREATE TABLE Studente (
+    matricola VARCHAR(10) PRIMARY KEY,
+    nome VARCHAR(100) NOT NULL,
+    cognome VARCHAR(100) NOT NULL,
+    cfu INTEGER NOT NULL
+);
+\end{lstlisting}
+
+La tabella rappresenta un semplice archivio di studenti universitari, dove:
+\begin{itemize}
+    \item \textbf{matricola} rappresenta l'identificativo univoco dello studente (chiave primaria)
+    \item \textbf{nome} e \textbf{cognome} sono i dati anagrafici
+    \item \textbf{cfu} rappresenta i Crediti Formativi Universitari accumulati dallo studente
+\end{itemize}
+
+\section{Generazione dei dati}
+Per popolare la tabella sono stati generati 50 studenti con dati casuali utilizzando la libreria Faker. Il codice per la generazione è il seguente:
+
+\begin{lstlisting}[language=Python]
+# Generatore di dati casuali
+fake = Faker('it_IT')
+
+# Funzione per generare dati casuali per gli studenti
+def generate_students(num_students):
+    students = []
+    for i in range(1, num_students + 1):
+        matricola = f"{10000 + i}"
+        nome = fake.first_name()
+        cognome = fake.last_name()
+        cfu = random.randint(0, 180)
+        students.append((matricola, nome, cognome, cfu))
+    return students
+
+# Inserisco 50 studenti casuali
+students = generate_students(50)
+cursor1.executemany(
+    "INSERT INTO Studente (matricola, nome, cognome, cfu) VALUES (%s, %s, %s, %s)",
+    students
+)
+\end{lstlisting}
+
+Ogni studente ha:
+\begin{itemize}
+    \item Una matricola sequenziale a partire da 10001
+    \item Nome e cognome generati casualmente (con nomi italiani)
+    \item Un numero di CFU casuale tra 0 e 180
+\end{itemize}
+
+\chapter{Livelli di isolamento in PostgreSQL}
+\section{READ COMMITTED}
+Il livello di isolamento READ COMMITTED rappresenta il comportamento predefinito in PostgreSQL. In questo livello:
+
+\begin{itemize}
+    \item Una query vede solo i dati che sono stati effettivamente committati al momento in cui la query stessa viene eseguita
+    \item Ogni esecuzione di una SELECT all'interno della stessa transazione può restituire risultati diversi se nel frattempo altre transazioni hanno effettuato e committato modifiche
+    \item Non è garantita la ripetibilità delle letture (non-repeatable reads)
+    \item Non è garantita la protezione contro le letture fantasma (phantom reads)
+\end{itemize}
+
+Questo livello consente la massima concorrenza ma offre le minori garanzie di isolamento.
+
+\section{REPEATABLE READ}
+Il livello REPEATABLE READ fornisce una maggiore consistenza rispetto al READ COMMITTED:
+
+\begin{itemize}
+    \item Garantisce che ogni lettura dello stesso dato all'interno di una transazione restituisca sempre lo stesso valore
+    \item Utilizza il sistema di versioni multiple dei dati (MVCC)
+    \item Tutte le letture in una transazione vedono uno snapshot consistente del database all'inizio della transazione
+    \item Previene le letture non ripetibili (non-repeatable reads)
+    \item Non garantisce completamente la protezione contro anomalie come il write skew
+\end{itemize}
+
+In questo livello, se una transazione legge una riga, qualsiasi altra transazione che tenta di modificare quella riga dovrà attendere che la prima transazione sia completata.
+
+\section{SERIALIZABLE}
+Il livello SERIALIZABLE è il più restrittivo tra quelli disponibili in PostgreSQL:
+
+\begin{itemize}
+    \item Garantisce il massimo grado di consistenza
+    \item Simula un'esecuzione seriale delle transazioni, anche se vengono eseguite in parallelo
+    \item Utilizza sia il sistema multiversione che il protocollo Two-Phase Locking (2PL)
+    \item Rileva potenziali conflitti di serializzazione e impedisce anomalie come write skew, phantom reads e read/write skew
+    \item Se viene rilevato un potenziale conflitto di serializzazione, una delle transazioni fallisce e deve essere riprovata
+\end{itemize}
+
+Questo livello offre le massime garanzie di isolamento ma può ridurre il throughput del sistema a causa dei fallimenti di serializzazione che richiedono tentativi ripetuti delle transazioni.
+
+\chapter{Test implementati}
+Per verificare il comportamento dei diversi livelli di isolamento sono stati implementati tre test specifici, ciascuno progettato per evidenziare particolari aspetti della concorrenza.
+
+\section{Test 1: Inserimento con cicli di lettura/scrittura}
+\subsection{Obiettivo}
+Questo test verifica il comportamento quando due transazioni leggono contemporaneamente un valore (il massimo CFU presente nella tabella) e lo utilizzano per un nuovo inserimento. Lo scopo è evidenziare anomalie come il write skew, che si verificano quando due transazioni basano le loro decisioni di scrittura su letture sovrapposte.
+
+\subsection{Procedura}
+\begin{enumerate}
+    \item Due client avviano transazioni con lo stesso livello di isolamento
+    \item Entrambi leggono il valore massimo di CFU presente nella tabella
+    \item Il primo client inserisce un nuovo studente con CFU pari al massimo letto + 10
+    \item Il secondo client inserisce un nuovo studente con CFU pari al massimo letto + 5
+    \item Entrambi i client tentano di committare le transazioni
+\end{enumerate}
+
+\subsection{Risultati attesi}
+\begin{itemize}
+    \item Con READ COMMITTED e REPEATABLE READ, entrambe le transazioni dovrebbero completarsi con successo poiché questi livelli non rilevano questo tipo di anomalia
+    \item Con SERIALIZABLE, ci aspettiamo che una delle due transazioni fallisca con un errore di serializzazione, poiché il sistema rileva il potenziale conflitto
+\end{itemize}
+
+\section{Test 2: Modifica concorrenziale dello stesso campo}
+\subsection{Obiettivo}
+Questo test verifica il comportamento quando due transazioni tentano di modificare contemporaneamente lo stesso campo dello stesso record. Lo scopo è evidenziare come PostgreSQL gestisce i conflitti diretti di update.
+
+\subsection{Procedura}
+\begin{enumerate}
+    \item Due client avviano transazioni con lo stesso livello di isolamento
+    \item Entrambi leggono il valore di CFU di uno studente specifico
+    \item Il primo client aggiorna il CFU incrementandolo di 10
+    \item Il secondo client tenta di aggiornare lo stesso CFU incrementandolo di 5
+    \item Entrambi i client tentano di committare le transazioni
+\end{enumerate}
+
+\subsection{Risultati attesi}
+\begin{itemize}
+    \item Con tutti i livelli di isolamento, ci aspettiamo che il secondo client rimanga in attesa che il primo rilasci il lock sulla riga
+    \item Se il primo client committa, il secondo dovrebbe poi essere in grado di applicare la sua modifica
+    \item Se impostato un timeout, il secondo client potrebbe andare in timeout se il primo non committa in tempo
+\end{itemize}
+
+\section{Test 3: Inserimento di un campo chiave primaria già esistente}
+\subsection{Obiettivo}
+Questo test verifica il comportamento quando due transazioni tentano di inserire contemporaneamente un record con la stessa chiave primaria. Lo scopo è evidenziare come PostgreSQL gestisce i conflitti di vincoli unici.
+
+\subsection{Procedura}
+\begin{enumerate}
+    \item Due client avviano transazioni con lo stesso livello di isolamento
+    \item Entrambi verificano che non esista uno studente con una specifica matricola
+    \item Il primo client inserisce uno studente con quella matricola
+    \item Il secondo client tenta di inserire un altro studente con la stessa matricola
+    \item Entrambi i client tentano di committare le transazioni
+\end{enumerate}
+
+\subsection{Risultati attesi}
+\begin{itemize}
+    \item Con tutti i livelli di isolamento, ci aspettiamo che il secondo client rimanga in attesa che il primo rilasci il lock sull'indice della chiave primaria
+    \item Se il primo client committa, il secondo dovrebbe fallire con un errore di violazione del vincolo di unicità
+    \item Se impostato un timeout, il secondo client potrebbe andare in timeout se il primo non committa in tempo
+\end{itemize}
+
+\chapter{Implementazione}
+\section{Connessione al database}
+Per prima cosa sono stati stabiliti due client distinti connessi allo stesso database:
+
+\begin{lstlisting}[language=Python]
+# Connessione del primo client al database
+conn1 = psycopg2.connect(
+    dbname="postgres",
+    user="postgres",
+    password="postgres",
+    host="localhost",
+    port="5432"
+)
+
+# Connessione del secondo client al database
+conn2 = psycopg2.connect(
+    dbname="postgres",
+    user="postgres",
+    password="postgres",
+    host="localhost",
+    port="5432"
+)
+
+# Cursore per interrogazioni per il primo client
+cursor1 = conn1.cursor()
+
+# Cursore per interrogazioni per il secondo client
+cursor2 = conn2.cursor()
+\end{lstlisting}
+
+\section{Implementazione del Test 1}
+Il codice per il test di inserimento con cicli di lettura/scrittura è il seguente:
+
+\begin{lstlisting}[language=Python]
+def test_read_write_cycle(isolation_level):
+    print(f"\n=== Test con livello di isolamento {isolation_level} ===")
+    
+    # Impostazione del livello di isolamento e avvio transazione per client 1
+    cursor1.execute(f"START TRANSACTION ISOLATION LEVEL {isolation_level};")
+    
+    # Client 1 legge il massimo CFU esistente
+    cursor1.execute("SELECT MAX(cfu) FROM Studente;")
+    max_cfu1 = cursor1.fetchone()[0]
+    print(f"Client 1: Massimo CFU rilevato = {max_cfu1}")
+    
+    # Impostazione del livello di isolamento e avvio transazione per client 2
+    cursor2.execute(f"START TRANSACTION ISOLATION LEVEL {isolation_level};")
+    
+    # Client 2 legge il massimo CFU esistente
+    cursor2.execute("SELECT MAX(cfu) FROM Studente;")
+    max_cfu2 = cursor2.fetchone()[0]
+    print(f"Client 2: Massimo CFU rilevato = {max_cfu2}")
+    
+    try:
+        # Client 1 inserisce un nuovo studente con CFU pari al massimo + 10
+        new_cfu1 = max_cfu1 + 10
+        cursor1.execute(f"""
+            INSERT INTO Studente (matricola, nome, cognome, cfu) 
+            VALUES ('99001', 'Mario', 'Rossi', {new_cfu1});
+        """)
+        print(f"Client 1: Inserito studente con {new_cfu1} CFU")
+        
+        # Client 2 inserisce un nuovo studente con CFU pari al massimo + 5
+        new_cfu2 = max_cfu2 + 5
+        cursor2.execute(f"""
+            INSERT INTO Studente (matricola, nome, cognome, cfu) 
+            VALUES ('99002', 'Laura', 'Bianchi', {new_cfu2});
+        """)
+        print(f"Client 2: Inserito studente con {new_cfu2} CFU")
+        
+        # Commit delle transazioni
+        conn1.commit()
+        print("Client 1: Commit eseguito con successo")
+        
+        conn2.commit()
+        print("Client 2: Commit eseguito con successo")
+        
+    except Exception as e:
+        print(f"Errore: {e}")
+        conn1.rollback()
+        conn2.rollback()
+    
+    # Verifica finale
+    cursor1.execute("SELECT matricola, cfu FROM Studente WHERE matricola IN ('99001', '99002') ORDER BY cfu DESC;")
+    result = cursor1.fetchall()
+    print("\nRisultato finale:")
+    for row in result:
+        print(f"Matricola: {row[0]}, CFU: {row[1]}")
+\end{lstlisting}
+
+\section{Implementazione del Test 2}
+Il codice per il test di modifica concorrenziale dello stesso campo è il seguente:
+
+\begin{lstlisting}[language=Python]
+def test_concurrent_update(isolation_level):
+    print(f"\n=== Test con livello di isolamento {isolation_level} ===")
+    
+    # Preparo il record di test
+    cursor1.execute("DELETE FROM Studente WHERE matricola = '10001';")
+    cursor1.execute("INSERT INTO Studente (matricola, nome, cognome, cfu) VALUES ('10001', 'Test', 'User', 60);")
+    conn1.commit()
+    
+    # Impostazione del livello di isolamento e avvio transazione per client 1
+    cursor1.execute(f"START TRANSACTION ISOLATION LEVEL {isolation_level};")
+    
+    # Imposto un timeout di 3 secondi per evitare blocchi infiniti
+    cursor2.execute("SET statement_timeout = 3000;")  # 3000 ms = 3 secondi
+    
+    # Impostazione del livello di isolamento e avvio transazione per client 2
+    cursor2.execute(f"START TRANSACTION ISOLATION LEVEL {isolation_level};")
+    
+    try:
+        # Client 1 legge il record
+        cursor1.execute("SELECT cfu FROM Studente WHERE matricola = '10001';")
+        cfu1 = cursor1.fetchone()[0]
+        print(f"Client 1: Letto CFU = {cfu1}")
+        
+        # Client 2 legge il record
+        cursor2.execute("SELECT cfu FROM Studente WHERE matricola = '10001';")
+        cfu2 = cursor2.fetchone()[0]
+        print(f"Client 2: Letto CFU = {cfu2}")
+        
+        # Client 1 aggiorna il record
+        cursor1.execute("UPDATE Studente SET cfu = cfu + 10 WHERE matricola = '10001';")
+        print("Client 1: Aggiornati CFU = cfu + 10")
+        
+        # Client 2 aggiorna il record - Questo potrebbe bloccarsi
+        try:
+            cursor2.execute("UPDATE Studente SET cfu = cfu + 5 WHERE matricola = '10001';")
+            print("Client 2: Aggiornati CFU = cfu + 5")
+        except psycopg2.errors.QueryCanceled as e:
+            print("Client 2: Timeout raggiunto durante l'attesa del lock")
+            print("Questo è un comportamento normale in PostgreSQL quando più client cercano di modificare lo stesso record")
+            raise e
+        
+        # Commit delle transazioni
+        conn1.commit()
+        print("Client 1: Commit eseguito con successo")
+        
+        conn2.commit()
+        print("Client 2: Commit eseguito con successo")
+        
+    except Exception as e:
+        print(f"Errore: {e}")
+        # Assicuriamoci di fare rollback di entrambe le connessioni
+        try:
+            conn1.rollback()
+            print("Client 1: Rollback eseguito")
+        except:
+            pass
+        try:
+            conn2.rollback()
+            print("Client 2: Rollback eseguito")
+        except:
+            pass
+    finally:
+        # Reset del timeout alla fine del test
+        cursor2.execute("SET statement_timeout = 0;")  # Torniamo al valore predefinito
+    
+    # Verifica finale
+    cursor1.execute("SELECT matricola, cfu FROM Studente WHERE matricola = '10001';")
+    result = cursor1.fetchone()
+    if result:
+        print(f"\nRisultato finale: Matricola {result[0]}, CFU: {result[1]}")
+    else:
+        print("\nRisultato finale: Record non trovato")
+\end{lstlisting}
+
+\section{Implementazione del Test 3}
+Il codice per il test di inserimento di un campo chiave primaria già esistente è il seguente:
+
+\begin{lstlisting}[language=Python]
+def test_primary_key_conflict(isolation_level):
+    print(f"\n=== Test con livello di isolamento {isolation_level} ===")
+    
+    # Rimuovo eventuali record di test precedenti
+    cursor1.execute("DELETE FROM Studente WHERE matricola = '20001';")
+    conn1.commit()
+    
+    # Impostazione del livello di isolamento e avvio transazione per client 1
+    cursor1.execute(f"START TRANSACTION ISOLATION LEVEL {isolation_level};")
+    
+    # Imposto un timeout di 3 secondi per evitare blocchi infiniti
+    cursor2.execute("SET statement_timeout = 3000;")  # 3000 ms = 3 secondi
+    
+    # Impostazione del livello di isolamento e avvio transazione per client 2
+    cursor2.execute(f"START TRANSACTION ISOLATION LEVEL {isolation_level};")
+    
+    try:
+        # Client 1 verifica se la matricola esiste
+        cursor1.execute("SELECT COUNT(*) FROM Studente WHERE matricola = '20001';")
+        count1 = cursor1.fetchone()[0]
+        print(f"Client 1: La matricola 20001 {'esiste già' if count1 > 0 else 'non esiste'}")
+        
+        # Client 2 verifica se la matricola esiste
+        cursor2.execute("SELECT COUNT(*) FROM Studente WHERE matricola = '20001';")
+        count2 = cursor2.fetchone()[0]
+        print(f"Client 2: La matricola 20001 {'esiste già' if count2 > 0 else 'non esiste'}")
+        
+        # Client 1 inserisce un nuovo studente con la matricola 20001
+        cursor1.execute("""
+            INSERT INTO Studente (matricola, nome, cognome, cfu) 
+            VALUES ('20001', 'Franco', 'Neri', 100);
+        """)
+        print("Client 1: Inserito studente con matricola 20001")
+        
+        # Client 2 inserisce un nuovo studente con la stessa matricola 20001
+        try:
+            cursor2.execute("""
+                INSERT INTO Studente (matricola, nome, cognome, cfu) 
+                VALUES ('20001', 'Anna', 'Verdi', 120);
+            """)
+            print("Client 2: Inserito studente con matricola 20001")
+        except psycopg2.errors.QueryCanceled as e:
+            print("Client 2: Timeout raggiunto durante l'attesa del lock")
+            print("Questo è un comportamento normale quando più client cercano di inserire lo stesso valore chiave")
+            raise e
+        except psycopg2.errors.UniqueViolation as e:
+            print("Client 2: Violazione del vincolo di chiave primaria")
+            print("Questo errore si verifica quando il primo client ha già committato l'inserimento")
+            raise e
+        
+        # Commit delle transazioni
+        conn1.commit()
+        print("Client 1: Commit eseguito con successo")
+        
+        conn2.commit()
+        print("Client 2: Commit eseguito con successo")
+        
+    except Exception as e:
+        print(f"Errore: {e}")
+        # Assicuriamoci di fare rollback di entrambe le connessioni
+        try:
+            conn1.rollback()
+            print("Client 1: Rollback eseguito")
+        except:
+            pass
+        try:
+            conn2.rollback()
+            print("Client 2: Rollback eseguito")
+        except:
+            pass
+    finally:
+        # Reset del timeout alla fine del test
+        cursor2.execute("SET statement_timeout = 0;")  # Torniamo al valore predefinito
+    
+    # Verifica finale
+    cursor1.execute("SELECT matricola, nome, cognome, cfu FROM Studente WHERE matricola = '20001';")
+    result = cursor1.fetchall()
+    print("\nRisultato finale:")
+    if result:
+        for row in result:
+            print(f"Matricola: {row[0]}, Nome: {row[1]}, Cognome: {row[2]}, CFU: {row[3]}")
+    else:
+        print("Nessun record trovato con matricola 20001")
+\end{lstlisting}
+
+\chapter{Risultati ottenuti}
+\section{Risultati del Test 1}
+
+\subsection{READ COMMITTED}
+\begin{verbatim}
+=== Test con livello di isolamento READ COMMITTED ===
+Client 1: Massimo CFU rilevato = 168
+Client 2: Massimo CFU rilevato = 168
+Client 1: Inserito studente con 178 CFU
+Client 2: Inserito studente con 173 CFU
+Client 1: Commit eseguito con successo
+Client 2: Commit eseguito con successo
+
+Risultato finale:
+Matricola: 99001, CFU: 178
+Matricola: 99002, CFU: 173
+\end{verbatim}
+
+\subsection{REPEATABLE READ}
+\begin{verbatim}
+=== Test con livello di isolamento REPEATABLE READ ===
+Client 1: Massimo CFU rilevato = 168
+Client 2: Massimo CFU rilevato = 168
+Client 1: Inserito studente con 178 CFU
+Client 2: Inserito studente con 173 CFU
+Client 1: Commit eseguito con successo
+Client 2: Commit eseguito con successo
+
+Risultato finale:
+Matricola: 99001, CFU: 178
+Matricola: 99002, CFU: 173
+\end{verbatim}
+
+\subsection{SERIALIZABLE}
+\begin{verbatim}
+=== Test con livello di isolamento SERIALIZABLE ===
+Client 1: Massimo CFU rilevato = 168
+Client 2: Massimo CFU rilevato = 168
+Client 1: Inserito studente con 178 CFU
+Client 2: Inserito studente con 173 CFU
+Client 1: Commit eseguito con successo
+Errore: ERRORE:  serializzazione dell'accesso fallita a causa di dipendenze di lettura/scrittura tra le transazioni
+DETAIL:  Reason code: Canceled on identification as a pivot, during commit attempt.
+HINT:  La transazione potrebbe riuscire se ritentata.
+
+Risultato finale:
+Matricola: 99001, CFU: 178
+\end{verbatim}
+
+\section{Risultati del Test 2}
+
+\subsection{READ COMMITTED}
+\begin{verbatim}
+=== Test con livello di isolamento READ COMMITTED ===
+Client 1: Letto CFU = 60
+Client 2: Letto CFU = 60
+Client 1: Aggiornati CFU = cfu + 10
+Client 2: Timeout raggiunto durante l'attesa del lock
+Questo è un comportamento normale in PostgreSQL quando più client cercano di modificare lo stesso record
+Errore: ERRORE:  annullamento dell'istruzione a causa di timeout
+CONTEXT:  durante la modifica della tupla (0,57) nella relazione "studente"
+
+Client 1: Rollback eseguito
+Client 2: Rollback eseguito
+
+Risultato finale: Matricola 10001, CFU: 60
+\end{verbatim}
+
+\subsection{REPEATABLE READ}
+\begin{verbatim}
+=== Test con livello di isolamento REPEATABLE READ ===
+Client 1: Letto CFU = 60
+Client 2: Letto CFU = 60
+Client 1: Aggiornati CFU = cfu + 10
+Client 2: Timeout raggiunto durante l'attesa del lock
+Questo è un comportamento normale in PostgreSQL quando più client cercano di modificare lo stesso record
+Errore: ERRORE:  annullamento dell'istruzione a causa di timeout
+CONTEXT:  durante la modifica della tupla (0,59) nella relazione "studente"
+
+Client 1: Rollback eseguito
+Client 2: Rollback eseguito
+
+Risultato finale: Matricola 10001, CFU: 60
+\end{verbatim}
+
+\subsection{SERIALIZABLE}
+\begin{verbatim}
+=== Test con livello di isolamento SERIALIZABLE ===
+Client 1: Letto CFU = 60
+Client 2: Letto CFU = 60
+Client 1: Aggiornati CFU = cfu + 10
+Client 2: Timeout raggiunto durante l'attesa del lock
+Questo è un comportamento normale in PostgreSQL quando più client cercano di modificare lo stesso record
+Errore: ERRORE:  annullamento dell'istruzione a causa di timeout
+CONTEXT:  durante la modifica della tupla (0,61) nella relazione "studente"
+
+Client 1: Rollback eseguito
+Client 2: Rollback eseguito
+
+Risultato finale: Matricola 10001, CFU: 60
+\end{verbatim}
+
+\section{Risultati del Test 3}
+
+\subsection{READ COMMITTED}
+\begin{verbatim}
+=== Test con livello di isolamento READ COMMITTED ===
+Client 1: La matricola 20001 non esiste
+Client 2: La matricola 20001 non esiste
+Client 1: Inserito studente con matricola 20001
+Client 2: Timeout raggiunto durante l'attesa del lock
+Questo è un comportamento normale quando più client cercano di inserire lo stesso valore chiave
+Errore: ERRORE:  annullamento dell'istruzione a causa di timeout
+CONTEXT:  durante l'inserimento della tupla di indice (0,64) nella relazione "studente_pkey"
+
+Client 1: Rollback eseguito
+Client 2: Rollback eseguito
+
+Risultato finale:
+Nessun record trovato con matricola 20001
+\end{verbatim}
+
+\subsection{REPEATABLE READ}
+\begin{verbatim}
+=== Test con livello di isolamento REPEATABLE READ ===
+Client 1: La matricola 20001 non esiste
+Client 2: La matricola 20001 non esiste
+Client 1: Inserito studente con matricola 20001
+Client 2: Timeout raggiunto durante l'attesa del lock
+Questo è un comportamento normale quando più client cercano di inserire lo stesso valore chiave
+Errore: ERRORE:  annullamento dell'istruzione a causa di timeout
+CONTEXT:  durante l'inserimento della tupla di indice (0,66) nella relazione "studente_pkey"
+
+Client 1: Rollback eseguito
+Client 2: Rollback eseguito
+
+Risultato finale:
+Nessun record trovato con matricola 20001
+\end{verbatim}
+
+\subsection{SERIALIZABLE}
+\begin{verbatim}
+=== Test con livello di isolamento SERIALIZABLE ===
+Client 1: La matricola 20001 non esiste
+Client 2: La matricola 20001 non esiste
+Client 1: Inserito studente con matricola 20001
+Client 2: Timeout raggiunto durante l'attesa del lock
+Questo è un comportamento normale quando più client cercano di inserire lo stesso valore chiave
+Errore: ERRORE:  annullamento dell'istruzione a causa di timeout
+CONTEXT:  durante l'inserimento della tupla di indice (0,68) nella relazione "studente_pkey"
+
+Client 1: Rollback eseguito
+Client 2: Rollback eseguito
+
+Risultato finale:
+Nessun record trovato con matricola 20001
+\end{verbatim}
+
+\chapter{Analisi dei risultati}
+
+\section{Test 1: Inserimento con cicli di lettura/scrittura}
+\begin{itemize}
+    \item \textbf{READ COMMITTED e REPEATABLE READ}: Come previsto, entrambi i client hanno letto lo stesso valore massimo di CFU (168) e sono riusciti a inserire i loro record con CFU incrementati (178 e 173). Entrambe le transazioni sono state committate con successo. Questo conferma che questi livelli di isolamento non rilevano anomalie di tipo write skew, dove due transazioni basano le loro decisioni di scrittura su letture sovrapposte.
+    
+    \item \textbf{SERIALIZABLE}: In linea con le aspettative, mentre il primo client ha inserito e committato con successo il suo record, il secondo client ha ricevuto un errore di serializzazione durante il tentativo di commit. L'errore specifica chiaramente il motivo: "serializzazione dell'accesso fallita a causa di dipendenze di lettura/scrittura tra le transazioni". Questo dimostra che il livello SERIALIZABLE rileva correttamente il potenziale conflitto di serializzazione e interrompe una delle transazioni per garantire la consistenza.
+\end{itemize}
+
+\section{Test 2: Modifica concorrenziale dello stesso campo}
+Per tutti i livelli di isolamento (READ COMMITTED, REPEATABLE READ e SERIALIZABLE), i risultati sono stati simili:
+\begin{itemize}
+    \item Entrambi i client hanno letto il valore iniziale di CFU (60)
+    \item Il primo client ha aggiornato il record
+    \item Il secondo client ha tentato di aggiornare lo stesso record ma è andato in timeout durante l'attesa del lock
+    \item Entrambe le transazioni sono state quindi annullate (rollback)
+\end{itemize}
+
+Questo comportamento dimostra il meccanismo di lock a livello di riga di PostgreSQL. Quando una transazione modifica una riga, ottiene un lock esclusivo su quella riga. Qualsiasi altra transazione che tenta di modificare la stessa riga deve attendere che il lock venga rilasciato. Il timeout che abbiamo impostato (3 secondi) ha impedito che il secondo client rimanesse bloccato indefinitamente.
+
+\section{Test 3: Inserimento di un campo chiave primaria già esistente}
+Anche in questo caso, i risultati sono stati simili per tutti i livelli di isolamento:
+\begin{itemize}
+    \item Entrambi i client hanno verificato che la matricola 20001 non esistesse
+    \item Il primo client ha inserito uno studente con quella matricola
+    \item Il secondo client ha tentato di inserire un altro studente con la stessa matricola ma è andato in timeout durante l'attesa del lock sull'indice della chiave primaria
+    \item Entrambe le transazioni sono state annullate
+\end{itemize}
+
+Questo test dimostra che PostgreSQL utilizza lock anche sugli indici delle chiavi primarie. Quando una transazione inserisce un valore per una chiave primaria, ottiene un lock su quell'indice. Se un'altra transazione tenta di inserire lo stesso valore, deve attendere. Se la prima transazione viene committata, la seconda fallirà con un errore di violazione del vincolo di unicità; se viene annullata, la seconda potrebbe procedere. Nel nostro caso, poiché abbiamo impostato un timeout, la seconda transazione è stata annullata prima che la prima potesse committare o annullare.
+
+\chapter{Conclusioni}
+
+I test effettuati hanno dimostrato chiaramente il diverso comportamento di PostgreSQL nei vari livelli di isolamento. Di seguito sono riportate le principali conclusioni:
+
+\section{Differenze tra i livelli di isolamento}
+
+\begin{itemize}
+    \item \textbf{READ COMMITTED}: Fornisce il livello minimo di isolamento ma con la massima concorrenza. Non rileva anomalie complesse come write skew, ma è sufficiente per molti casi d'uso. È il livello predefinito in PostgreSQL proprio perché offre un buon equilibrio tra consistenza e performance.
+
+    \item \textbf{REPEATABLE READ}: Offre maggiori garanzie rispetto al READ COMMITTED, assicurando che le letture ripetute restituiscano sempre gli stessi valori all'interno di una transazione. Tuttavia, come abbiamo visto nel Test 1, non rileva anomalie di tipo write skew.
+
+    \item \textbf{SERIALIZABLE}: Fornisce il massimo livello di isolamento, garantendo che il risultato dell'esecuzione concorrente di transazioni sia equivalente a un'esecuzione seriale. Come dimostrato nel Test 1, rileva correttamente i conflitti di serializzazione e interrompe una delle transazioni coinvolte.
+\end{itemize}
+
+\section{Comportamento di lock in PostgreSQL}
+
+I Test 2 e 3 hanno evidenziato il meccanismo di lock utilizzato da PostgreSQL:
+
+\begin{itemize}
+    \item I lock vengono acquisiti sia sulle righe (per le operazioni di UPDATE) che sugli indici (per le operazioni che coinvolgono chiavi primarie e indici unici)
+    \item Quando una transazione detiene un lock su una riga o un indice, altre transazioni che tentano di accedere alla stessa risorsa devono attendere il rilascio del lock
+    \item Implementare timeout appropriati è essenziale per evitare blocchi indefiniti
+\end{itemize}
+
+\section{Considerazioni per le applicazioni reali}
+
+Sulla base dei risultati ottenuti, possiamo formulare alcune raccomandazioni per le applicazioni reali:
+
+\begin{itemize}
+    \item La scelta del livello di isolamento dovrebbe essere basata sulle specifiche esigenze dell'applicazione, bilanciando consistenza e performance
+    \item READ COMMITTED è spesso sufficiente per applicazioni che non richiedono garanzie di serializzazione stringenti
+    \item SERIALIZABLE dovrebbe essere usato quando è essenziale garantire che tutte le transazioni operino su uno snapshot consistente del database
+    \item È importante implementare una logica di retry per gestire gli errori di serializzazione che possono verificarsi nel livello SERIALIZABLE
+    \item Per evitare deadlock o attese indefinite, è consigliabile impostare timeout appropriati sulle transazioni
+\end{itemize}
+
+Il sistema MVCC (Multi-Version Concurrency Control) di PostgreSQL dimostra la sua efficacia nel bilanciare consistenza e concorrenza, permettendo a molte transazioni di operare contemporaneamente senza bloccarsi reciprocamente, tranne nei casi in cui si tenta di modificare gli stessi dati. Questa caratteristica, combinata con i diversi livelli di isolamento disponibili, rende PostgreSQL una scelta eccellente per applicazioni che richiedono un database transazionale robusto e versatile.
+
+\end{document}
